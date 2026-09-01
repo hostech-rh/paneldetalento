@@ -585,7 +585,7 @@ function setSyncStatus(html){
 function classifyPdfs(pdfFiles){
   const result = { resumen: null, cultura: null, personalidad: null, disc: null, liderazgo: null };
   for(const f of pdfFiles){
-    const n = f.title.toLowerCase();
+    const n = (f.name || '').toLowerCase();
     if(n.startsWith('00_') || n.includes('resumen')){
       result.resumen = f;
     } else if(n.includes('cul_y_men') || n.includes('cultura')){
