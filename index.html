@@ -581,6 +581,7 @@ async function loadEmployeesFromDrive(){
         const jsonFiles = await driveList(`'${folder.id}' in parents and name='datos.json' and trashed=false`);
         if(jsonFiles.length === 0) continue;
         const emp = await driveGetJson(jsonFiles[0].id);
+        emp._jsonFileId = jsonFiles[0].id;
 
         const pdfFiles = await driveList(`'${folder.id}' in parents and mimeType='application/pdf' and trashed=false`);
         if(pdfFiles.length > 0){
@@ -672,6 +673,7 @@ function fieldRow(label, value){
 function renderBasico(emp){
   const b = emp.basico;
   let html = '';
+  html += `<div id="basicoReadView">`;
   html += fieldRow('Fecha de nacimiento', b.cumpleanos);
   html += fieldRow('Aniversario laboral', b.aniversario);
   html += fieldRow('Personas a cargo', (b.equipoACargo || b.equipoACargo === 0) ? String(b.equipoACargo) : null);
@@ -687,6 +689,38 @@ function renderBasico(emp){
         ? b.puestos.map(p => `<div class="posting-item"><span>${p.titulo}</span><span class="years">${p.periodo}</span></div>`).join('')
         : `<div class="posting-item" style="border-left-color:#D8DCEE;color:#9AA0AE;font-style:italic;">Completar información</div>` }
   </div>`;
+  html += `<button id="editBasicoBtn" style="margin-top:18px;background:var(--accent-soft);color:var(--accent);border:none;padding:9px 16px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;">✏️ Editar datos básicos</button>`;
+  html += `</div>`;
+
+  // ---- Vista de edición (oculta por defecto) ----
+  html += `<div id="basicoEditView" style="display:none;">
+    <div class="field-row" style="display:block;">
+      <label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px;">Fecha de nacimiento</label>
+      <input id="editCumpleanos" type="text" placeholder="ej. 14 de marzo" value="${b.cumpleanos || ''}" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-family:'Inter',sans-serif;font-size:13.5px;">
+    </div>
+    <div class="field-row" style="display:block;">
+      <label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px;">Aniversario laboral</label>
+      <input id="editAniversario" type="text" placeholder="ej. 01 de julio, 2021 (5 años)" value="${b.aniversario || ''}" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-family:'Inter',sans-serif;font-size:13.5px;">
+    </div>
+    <div class="field-row" style="display:block;">
+      <label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px;">Personas a cargo</label>
+      <input id="editEquipoACargo" type="number" min="0" placeholder="ej. 6" value="${(b.equipoACargo || b.equipoACargo === 0) ? b.equipoACargo : ''}" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-family:'Inter',sans-serif;font-size:13.5px;">
+    </div>
+    <div class="field-row" style="display:block;">
+      <label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px;">Objetivos / proyectos clave (uno por línea)</label>
+      <textarea id="editObjetivos" rows="4" placeholder="Un objetivo por línea" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-family:'Inter',sans-serif;font-size:13.5px;resize:vertical;">${(b.objetivos || []).join('\n')}</textarea>
+    </div>
+    <div class="field-row" style="display:block;">
+      <label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px;">Puestos ocupados (uno por línea, formato: Título - Periodo)</label>
+      <textarea id="editPuestos" rows="4" placeholder="Gerente Regional - 2022 - actual" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-family:'Inter',sans-serif;font-size:13.5px;resize:vertical;">${(b.puestos || []).map(p => `${p.titulo} - ${p.periodo}`).join('\n')}</textarea>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:14px;align-items:center;">
+      <button id="saveBasicoBtn" style="background:var(--accent);color:#fff;border:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;">Guardar cambios</button>
+      <button id="cancelBasicoBtn" style="background:transparent;color:var(--muted);border:1px solid var(--line);padding:10px 18px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;">Cancelar</button>
+      <span id="saveBasicoStatus" style="font-size:12.5px;color:var(--muted);"></span>
+    </div>
+  </div>`;
+
   return html;
 }
 
@@ -768,6 +802,7 @@ function openDrawer(emp){
   document.getElementById('panel-basico').innerHTML = renderBasico(emp);
   document.getElementById('panel-sintesis').innerHTML = renderSintesis(emp);
   document.getElementById('panel-detalle').innerHTML = renderDetalle(emp);
+  wireBasicoEdit(emp);
 
   const viewBtn = document.getElementById('viewPdfBtn');
   if(emp.resumenPdfDriveId || (emp.resumenPdf && emp.resumenPdf.base64)){
@@ -784,6 +819,53 @@ function openDrawer(emp){
   overlay.classList.add('open');
   drawer.classList.add('open');
 }
+
+function wireBasicoEdit(emp){
+  const readView = document.getElementById('basicoReadView');
+  const editView = document.getElementById('basicoEditView');
+  const editBtn = document.getElementById('editBasicoBtn');
+  const saveBtn = document.getElementById('saveBasicoBtn');
+  const cancelBtn = document.getElementById('cancelBasicoBtn');
+  const statusEl = document.getElementById('saveBasicoStatus');
+  if(!editBtn) return;
+
+  editBtn.onclick = () => {
+    readView.style.display = 'none';
+    editView.style.display = 'block';
+  };
+  cancelBtn.onclick = () => {
+    editView.style.display = 'none';
+    readView.style.display = 'block';
+  };
+  saveBtn.onclick = async () => {
+    const nuevoBasico = {
+      cumpleanos: document.getElementById('editCumpleanos').value.trim() || null,
+      aniversario: document.getElementById('editAniversario').value.trim() || null,
+      equipoACargo: document.getElementById('editEquipoACargo').value === '' ? null : Number(document.getElementById('editEquipoACargo').value),
+      objetivos: document.getElementById('editObjetivos').value.split('\n').map(s => s.trim()).filter(Boolean),
+      puestos: document.getElementById('editPuestos').value.split('\n').map(s => s.trim()).filter(Boolean).map(line => {
+        const idx = line.lastIndexOf(' - ');
+        return idx === -1
+          ? { titulo: line, periodo: '' }
+          : { titulo: line.slice(0, idx).trim(), periodo: line.slice(idx + 3).trim() };
+      })
+    };
+
+    statusEl.textContent = 'Guardando...';
+    saveBtn.disabled = true;
+    try {
+      await saveBasicoToDrive(emp, nuevoBasico);
+      document.getElementById('panel-basico').innerHTML = renderBasico(emp);
+      wireBasicoEdit(emp);
+      statusEl.textContent = '';
+    } catch(err){
+      console.error(err);
+      statusEl.textContent = '❌ No se pudo guardar: ' + err.message;
+      saveBtn.disabled = false;
+    }
+  };
+}
+
 
 function openPdfModal(emp){
   document.getElementById('pdfModalTitle').textContent = `Resumen — ${emp.name}`;
@@ -904,7 +986,55 @@ window.addEventListener('load', () => {
     document.getElementById('googleSignInButton'),
     { theme: 'filled_blue', size: 'large', text: 'signin_with', shape: 'pill' }
   );
+
+  // Cliente de token OAuth aparte, solo para poder GUARDAR cambios en Drive.
+  // Se pide permiso (una ventana emergente de Google) únicamente la primera
+  // vez que la persona le da clic a "Guardar".
+  driveWriteTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: AUTH_CONFIG.googleClientId,
+    scope: 'https://www.googleapis.com/auth/drive',
+    callback: '' // se define dinámicamente al pedir el token, ver requestDriveWriteAccess()
+  });
 });
+
+let driveWriteTokenClient = null;
+let driveWriteAccessToken = null;
+
+function requestDriveWriteAccess(){
+  return new Promise((resolve, reject) => {
+    if(driveWriteAccessToken){ resolve(driveWriteAccessToken); return; }
+    if(!driveWriteTokenClient){ reject(new Error('Cliente OAuth no inicializado')); return; }
+    driveWriteTokenClient.callback = (resp) => {
+      if(resp.error){ reject(resp); return; }
+      driveWriteAccessToken = resp.access_token;
+      resolve(driveWriteAccessToken);
+    };
+    driveWriteTokenClient.requestAccessToken({ prompt: '' });
+  });
+}
+
+async function saveBasicoToDrive(emp, nuevoBasico){
+  const token = await requestDriveWriteAccess();
+  const updatedEmp = Object.assign({}, emp, { basico: nuevoBasico });
+  delete updatedEmp._jsonFileId; // no guardamos este campo interno dentro del archivo
+
+  const res = await fetch(
+    `https://www.googleapis.com/upload/drive/v3/files/${emp._jsonFileId}?uploadType=media`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(updatedEmp)
+    }
+  );
+  if(!res.ok){
+    const body = await res.text().catch(() => '');
+    throw new Error(`Drive save ${res.status}: ${body.slice(0,200)}`);
+  }
+  emp.basico = nuevoBasico; // reflejar el cambio localmente sin recargar todo
+}
 </script>
 </body>
 </html>
