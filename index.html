@@ -608,10 +608,14 @@ async function loadEmployeesFromDrive(){
       `'${DRIVE_CONFIG.rootFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
     );
     const loaded = [];
+    const erroresPorCarpeta = [];
     for(const folder of subfolders){
       try {
         const jsonFiles = await driveList(`'${folder.id}' in parents and name='datos.json' and trashed=false`);
-        if(jsonFiles.length === 0) continue;
+        if(jsonFiles.length === 0){
+          erroresPorCarpeta.push(`${folder.name}: sin datos.json`);
+          continue;
+        }
         const emp = await driveGetJson(jsonFiles[0].id);
         emp._jsonFileId = jsonFiles[0].id;
 
@@ -622,15 +626,20 @@ async function loadEmployeesFromDrive(){
         loaded.push(emp);
       } catch(innerErr){
         console.warn('No se pudo cargar la carpeta', folder.name, innerErr);
+        erroresPorCarpeta.push(`${folder.name}: ${innerErr.message}`);
       }
     }
     employees = loaded;
     renderCards(employees);
     if(employees.length === 0){
-      setSyncStatus('⚠️ Conectado a Drive, pero no se encontró ningún "datos.json" en las subcarpetas.');
+      const detalle = subfolders.length === 0
+        ? 'No se encontró ninguna subcarpeta dentro de la carpeta raíz (revisa el ID de carpeta o los permisos para "Cualquiera con el enlace").'
+        : erroresPorCarpeta.slice(0, 3).join(' · ');
+      setSyncStatus(`⚠️ Conectado a Drive (${subfolders.length} subcarpeta(s) vista(s)), pero 0 se pudieron leer. ${detalle}`);
     } else {
       const now = new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
-      setSyncStatus(`✅ Sincronizado con Drive · ${now}`);
+      let msg = `✅ Sincronizado con Drive · ${now} (${employees.length} de ${subfolders.length} carpetas)`;
+      setSyncStatus(msg);
     }
   } catch(err){
     console.error(err);
