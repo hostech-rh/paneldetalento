@@ -256,6 +256,15 @@
   }
   .close-btn:hover{ background: rgba(255,255,255,0.2); }
   #viewPdfBtn:hover{ background: rgba(255,255,255,0.22); }
+  .pdf-pill{
+    display:inline-flex;align-items:center;gap:6px;
+    background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);
+    color:#fff;padding:7px 12px;border-radius:8px;font-size:12px;font-weight:600;
+    cursor:pointer;font-family:'Inter',sans-serif;
+  }
+  .pdf-pill:hover{ background: rgba(255,255,255,0.22); }
+  .pdf-pill.primary{ background:var(--accent); border-color:var(--accent); }
+  .pdf-pill.primary:hover{ filter:brightness(1.1); }
 
   /* PDF viewer modal */
   .pdf-overlay{
@@ -464,9 +473,12 @@
         <p id="syncStatus" style="margin:8px 0 0;font-size:11px;font-family:'IBM Plex Mono',monospace;color:#9DAAF2;">⏳ Conectando con Drive...</p>
       </div>
     </div>
-    <div class="search-box">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input id="searchInput" type="text" placeholder="Buscar colaborador..." />
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+      <div class="search-box">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="searchInput" type="text" placeholder="Buscar colaborador..." />
+      </div>
+      <button id="logoutBtn" style="display:none;background:none;border:none;color:#9DAAF2;font-size:11.5px;cursor:pointer;text-decoration:underline;padding:0;">Cerrar sesión</button>
     </div>
   </div>
 </div>
@@ -494,10 +506,7 @@
     </div>
     <div class="name" id="drawerName">—</div>
     <div class="role" id="drawerRole">—</div>
-    <button id="viewPdfBtn" style="display:inline-flex;align-items:center;gap:8px;margin-top:14px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:#fff;padding:8px 14px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-      Ver resumen (PDF)
-    </button>
+    <div id="pdfButtonsRow" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;"></div>
   </div>
   <div class="drawer-body">
     <div class="tabs">
@@ -569,6 +578,29 @@ function setSyncStatus(html){
   if(el) el.innerHTML = html;
 }
 
+/* Identifica qué es cada PDF según su nombre de archivo:
+   - El resumen que armamos nosotros: empieza con "00_" o contiene "resumen"
+   - Los 4 originales de Hirint: se identifican por los sufijos que usa
+     el propio nombre de archivo que exporta Hirint. */
+function classifyPdfs(pdfFiles){
+  const result = { resumen: null, cultura: null, personalidad: null, disc: null, liderazgo: null };
+  for(const f of pdfFiles){
+    const n = f.title.toLowerCase();
+    if(n.startsWith('00_') || n.includes('resumen')){
+      result.resumen = f;
+    } else if(n.includes('cul_y_men') || n.includes('cultura')){
+      result.cultura = f;
+    } else if(n.includes('_per_') || n.includes('personalidad')){
+      result.personalidad = f;
+    } else if(n.includes('_dis_') || n.includes('disc')){
+      result.disc = f;
+    } else if(n.includes('hab_de_lid') || n.includes('liderazgo')){
+      result.liderazgo = f;
+    }
+  }
+  return result;
+}
+
 async function loadEmployeesFromDrive(){
   setSyncStatus('⏳ Sincronizando con Drive...');
   try {
@@ -584,9 +616,9 @@ async function loadEmployeesFromDrive(){
         emp._jsonFileId = jsonFiles[0].id;
 
         const pdfFiles = await driveList(`'${folder.id}' in parents and mimeType='application/pdf' and trashed=false`);
-        if(pdfFiles.length > 0){
-          emp.resumenPdfDriveId = pdfFiles[0].id;
-        }
+        emp.pdfs = classifyPdfs(pdfFiles);
+        // compatibilidad con el visor: el botón principal sigue usando resumenPdfDriveId
+        if(emp.pdfs.resumen) emp.resumenPdfDriveId = emp.pdfs.resumen.id;
         loaded.push(emp);
       } catch(innerErr){
         console.warn('No se pudo cargar la carpeta', folder.name, innerErr);
@@ -804,12 +836,32 @@ function openDrawer(emp){
   document.getElementById('panel-detalle').innerHTML = renderDetalle(emp);
   wireBasicoEdit(emp);
 
-  const viewBtn = document.getElementById('viewPdfBtn');
-  if(emp.resumenPdfDriveId || (emp.resumenPdf && emp.resumenPdf.base64)){
-    viewBtn.style.display = 'inline-flex';
-    viewBtn.onclick = () => openPdfModal(emp);
-  } else {
-    viewBtn.style.display = 'none';
+  const pdfRow = document.getElementById('pdfButtonsRow');
+  pdfRow.innerHTML = '';
+  const pdfOptions = [
+    { key: 'resumen', label: '👁 Ver resumen', primary: true },
+    { key: 'cultura', label: 'Cultura y Mentalidad' },
+    { key: 'personalidad', label: 'Personalidad' },
+    { key: 'disc', label: 'DISC' },
+    { key: 'liderazgo', label: 'Habilidades de Liderazgo' }
+  ];
+  if(emp.pdfs){
+    pdfOptions.forEach(opt => {
+      const file = emp.pdfs[opt.key];
+      if(!file) return;
+      const btn = document.createElement('button');
+      btn.className = 'pdf-pill' + (opt.primary ? ' primary' : '');
+      btn.textContent = opt.label;
+      btn.onclick = () => openPdfModal(file.id, `${opt.label} — ${emp.name}`);
+      pdfRow.appendChild(btn);
+    });
+  } else if(emp.resumenPdf && emp.resumenPdf.base64){
+    // Modo local de respaldo (sin conexión a Drive)
+    const btn = document.createElement('button');
+    btn.className = 'pdf-pill primary';
+    btn.textContent = '👁 Ver resumen';
+    btn.onclick = () => openPdfModalLocal(emp);
+    pdfRow.appendChild(btn);
   }
 
   // reset to first tab
@@ -867,36 +919,37 @@ function wireBasicoEdit(emp){
 }
 
 
-function openPdfModal(emp){
-  document.getElementById('pdfModalTitle').textContent = `Resumen — ${emp.name}`;
+function openPdfModal(fileId, title){
+  document.getElementById('pdfModalTitle').textContent = title;
   const frame = document.getElementById('pdfFrame');
   const dlLink = document.getElementById('openTabLink');
 
-  if(emp.resumenPdfDriveId){
-    // PDF vive en Drive: usamos el visor nativo de Google (respeta permisos de la carpeta)
-    if(frame.dataset.blobUrl){ URL.revokeObjectURL(frame.dataset.blobUrl); frame.dataset.blobUrl = ''; }
-    frame.src = `https://drive.google.com/file/d/${emp.resumenPdfDriveId}/preview`;
-    dlLink.href = `https://drive.google.com/uc?id=${emp.resumenPdfDriveId}&export=download`;
-    dlLink.removeAttribute('download');
-  } else if(emp.resumenPdf && emp.resumenPdf.base64){
-    // Modo local (base64 embebido) — respaldo para cuando no hay conexión a Drive
-    const byteChars = atob(emp.resumenPdf.base64);
-    const byteNumbers = new Array(byteChars.length);
-    for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: PDF_MIME });
-    const url = URL.createObjectURL(blob);
-    if(frame.dataset.blobUrl) URL.revokeObjectURL(frame.dataset.blobUrl);
-    frame.dataset.blobUrl = url;
-    frame.src = url;
-    dlLink.href = url;
-    dlLink.setAttribute('download', emp.resumenPdf.filename);
-  } else {
-    frame.src = 'about:blank';
-    dlLink.href = '#';
-  }
+  if(frame.dataset.blobUrl){ URL.revokeObjectURL(frame.dataset.blobUrl); frame.dataset.blobUrl = ''; }
+  frame.src = `https://drive.google.com/file/d/${fileId}/preview`;
+  dlLink.href = `https://drive.google.com/uc?id=${fileId}&export=download`;
+  dlLink.removeAttribute('download');
   document.getElementById('pdfOverlay').classList.add('open');
 }
+
+function openPdfModalLocal(emp){
+  // Modo local (base64 embebido) — respaldo para cuando no hay conexión a Drive
+  document.getElementById('pdfModalTitle').textContent = `Resumen — ${emp.name}`;
+  const frame = document.getElementById('pdfFrame');
+  const dlLink = document.getElementById('openTabLink');
+  const byteChars = atob(emp.resumenPdf.base64);
+  const byteNumbers = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+  const byteArray = new Uint8Array(byteNumbers);
+  const blob = new Blob([byteArray], { type: PDF_MIME });
+  const url = URL.createObjectURL(blob);
+  if(frame.dataset.blobUrl) URL.revokeObjectURL(frame.dataset.blobUrl);
+  frame.dataset.blobUrl = url;
+  frame.src = url;
+  dlLink.href = url;
+  dlLink.setAttribute('download', emp.resumenPdf.filename);
+  document.getElementById('pdfOverlay').classList.add('open');
+}
+
 function closePdfModal(){
   document.getElementById('pdfOverlay').classList.remove('open');
   const frame = document.getElementById('pdfFrame');
@@ -931,6 +984,11 @@ document.getElementById('searchInput').addEventListener('input', (e) => {
   renderCards(employees.filter(emp => emp.name.toLowerCase().includes(q)));
 });
 
+document.getElementById('logoutBtn').addEventListener('click', () => {
+  try { sessionStorage.removeItem('panelTalentoSesion'); } catch(e){}
+  location.reload();
+});
+
 /* =========================================================
    AUTENTICACIÓN — solo cuentas @hostech pueden ver el panel
    Pega aquí tu Client ID de Google (termina en
@@ -961,13 +1019,31 @@ function handleCredentialResponse(response){
   const domainOk = email.toLowerCase().endsWith('@' + AUTH_CONFIG.allowedDomain.toLowerCase());
 
   if(payload.email_verified && domainOk){
+    // Recordar esta sesión mientras el navegador/pestaña siga abierta
+    // (sessionStorage se borra solo al cerrar la pestaña o el navegador).
+    try {
+      sessionStorage.setItem('panelTalentoSesion', JSON.stringify({ email, ts: Date.now() }));
+    } catch(e){ /* si el navegador bloquea sessionStorage, simplemente no se recuerda */ }
+
     document.getElementById('authGate').style.display = 'none';
     document.getElementById('appContent').style.display = 'block';
+    document.getElementById('logoutBtn').style.display = 'inline-block';
     loadEmployeesFromDrive();
   } else {
     const err = document.getElementById('authError');
     err.textContent = `La cuenta ${email} no pertenece a @${AUTH_CONFIG.allowedDomain}. Acceso denegado.`;
     err.style.display = 'block';
+  }
+}
+
+function haySesionRecordada(){
+  try {
+    const raw = sessionStorage.getItem('panelTalentoSesion');
+    if(!raw) return false;
+    const data = JSON.parse(raw);
+    return !!(data && data.email && data.email.toLowerCase().endsWith('@' + AUTH_CONFIG.allowedDomain.toLowerCase()));
+  } catch(e){
+    return false;
   }
 }
 
@@ -977,6 +1053,16 @@ window.addEventListener('load', () => {
     document.getElementById('authError').style.display = 'block';
     return;
   }
+
+  // Si ya inició sesión antes en esta misma pestaña/navegador (y no lo ha
+  // cerrado), saltamos directo al panel sin pedirle login otra vez.
+  if(haySesionRecordada()){
+    document.getElementById('authGate').style.display = 'none';
+    document.getElementById('appContent').style.display = 'block';
+    document.getElementById('logoutBtn').style.display = 'inline-block';
+    loadEmployeesFromDrive();
+  }
+
   google.accounts.id.initialize({
     client_id: AUTH_CONFIG.googleClientId,
     callback: handleCredentialResponse,
