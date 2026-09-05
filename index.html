@@ -753,7 +753,7 @@ function calcularPanoramaEquipo(list){
   };
 }
 
-function renderPanoramaEquipo(list){
+function renderResumenEquipo(list, narrativa){
   const p = calcularPanoramaEquipo(list);
   let html = `<div class="stat-strip">
     <div class="stat-box"><div class="num">${p.total}</div><div class="lbl">Fichas visibles</div></div>
@@ -761,21 +761,113 @@ function renderPanoramaEquipo(list){
     <div class="stat-box"><div class="num">${p.promAjusteCultura ?? '—'}%</div><div class="lbl">Ajuste cultura prom.</div></div>
   </div>`;
 
-  html += `<h3 class="section-title">Índices de mentalidad cultural — % en nivel Bajo</h3>`;
-  p.conteoIndices.forEach(i => {
-    const pct = i.visto ? Math.round((i.bajo / i.visto) * 100) : 0;
-    html += `<div class="bar-row">
-      <div class="bar-label"><span>${i.nombre}</span><span class="n">${i.bajo}/${i.visto}</span></div>
-      <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:var(--bajo);"></div></div>
-    </div>`;
-  });
-
-  html += `<h3 class="section-title">Cultura predominante en el equipo</h3><div class="tag-row" style="margin-bottom:6px;">`;
+  html += `<div class="tag-row" style="margin:14px 0 18px;">`;
   Object.entries(p.culturas).forEach(([cultura, n]) => {
     html += `<span class="tag tag-cyan">${cultura}: ${n}</span>`;
   });
   html += `</div>`;
-  html += `<p style="font-size:12.5px;color:var(--muted);margin-top:14px;">Este panorama se recalcula automáticamente con las fichas que tengas visibles en este momento — no requiere actualización manual.</p>`;
+
+  html += `<h3 class="section-title">Lo que aporta el equipo hoy</h3><ul class="bullets">`;
+  (narrativa.fortalezas || []).forEach(f => { html += `<li><b>${f.titulo}:</b> ${f.detalle}</li>`; });
+  html += `</ul>`;
+
+  html += `<h3 class="section-title">Qué reforzar</h3><ul class="bullets">`;
+  (narrativa.areas || []).forEach(a => { html += `<li><b>${a.titulo}:</b> ${a.detalle}</li>`; });
+  html += `</ul>`;
+
+  html += `<p style="font-size:12px;color:var(--muted);margin-top:16px;">Los números de arriba se recalculan solos con lo que tengas visible en este momento; el texto de fortalezas y áreas viene de equipo.json y se actualiza a mano cuando algo cambie de fondo.</p>`;
+
+  return html;
+}
+
+function round1(n){ return Math.round(n * 10) / 10; }
+
+function promedioCampoAnidado(list, extractor){
+  const vals = list.map(extractor).filter(v => typeof v === 'number' && !isNaN(v));
+  if(!vals.length) return 0;
+  return vals.reduce((a,b) => a+b, 0) / vals.length;
+}
+
+function promedioCulturaEquipo(list, nombreCultura){
+  return promedioCampoAnidado(list, emp => {
+    const item = (emp.evaluacion?.detalle?.cultura || []).find(c => c.nombre === nombreCultura);
+    return item ? item.puntuacion : null;
+  });
+}
+
+function promedioEstiloLiderazgo(list, nombreEstilo){
+  return promedioCampoAnidado(list, emp => {
+    const item = (emp.evaluacion?.detalle?.liderazgoEstilos || []).find(e => e.nombre === nombreEstilo);
+    return item ? item.puntuacion : null;
+  });
+}
+
+function distribucionNivelesEquipo(list, extractor){
+  const counts = {};
+  list.forEach(emp => {
+    const val = extractor(emp);
+    if(val) counts[val] = (counts[val] || 0) + 1;
+  });
+  return counts;
+}
+
+function renderDistribucionNiveles(etiqueta, counts){
+  const orden = ['Predominante','Alto','Medio','Medio-Bajo','Bajo'];
+  const keys = Object.keys(counts).sort((a,b) => orden.indexOf(a) - orden.indexOf(b));
+  const pills = keys.map(k => `<span class="level-pill ${levelClass(k)}" style="margin-right:5px;">${k} · ${counts[k]}</span>`).join('');
+  return `<div style="margin-bottom:12px;">
+    <div style="font-size:12.5px;color:var(--muted);margin-bottom:5px;">${etiqueta}</div>
+    <div>${pills || '<span style="color:var(--muted);font-style:italic;font-size:12.5px;">Sin datos</span>'}</div>
+  </div>`;
+}
+
+function renderDetallePruebasEquipo(list){
+  const p = calcularPanoramaEquipo(list);
+  const PERS_DIMS = ['Apertura','Estabilidad','Responsabilidad','Extraversión','Amabilidad'];
+  const CULTURAS = ['Cultura de Mercado','Cultura de Clan','Cultura de Jerarquía','Cultura de Emprendimiento'];
+  const ESTILOS = ['Liderazgo Transformacional','Liderazgo Transaccional','Liderazgo Adaptativo'];
+  const LID_INDICES = ['Liderazgo Consciente','Liderazgo Estratégico'];
+
+  let html = '';
+
+  html += `<details class="accordion" open><summary>Personalidad — distribución del equipo</summary><div class="accordion-body">`;
+  PERS_DIMS.forEach(dim => {
+    const counts = distribucionNivelesEquipo(list, emp => {
+      const item = (emp.evaluacion?.detalle?.personalidad || []).find(p => p.dim === dim);
+      return item ? item.nivel : null;
+    });
+    html += renderDistribucionNiveles(dim, counts);
+  });
+  html += `</div></details>`;
+
+  html += `<details class="accordion"><summary>DISC — promedio del equipo</summary><div class="accordion-body">`;
+  html += bar('Dominancia (D)', round1(promedioCampoAnidado(list, e => e.evaluacion?.detalle?.disc?.general?.D)));
+  html += bar('Influencia (I)', round1(promedioCampoAnidado(list, e => e.evaluacion?.detalle?.disc?.general?.I)));
+  html += bar('Estabilidad (S)', round1(promedioCampoAnidado(list, e => e.evaluacion?.detalle?.disc?.general?.S)));
+  html += bar('Consciencia (C)', round1(promedioCampoAnidado(list, e => e.evaluacion?.detalle?.disc?.general?.C)));
+  const arquetipos = distribucionNivelesEquipo(list, emp => emp.evaluacion?.discArquetipo);
+  html += `<div style="margin-top:10px;"><div style="font-size:12.5px;color:var(--muted);margin-bottom:5px;">Arquetipos en el equipo</div>`;
+  html += Object.entries(arquetipos).map(([k,n]) => `<span class="tag" style="margin-right:5px;">${k} · ${n}</span>`).join('');
+  html += `</div></div></details>`;
+
+  html += `<details class="accordion"><summary>Cultura y Mentalidad — promedio del equipo</summary><div class="accordion-body">`;
+  CULTURAS.forEach(c => html += bar(c.replace('Cultura de ', ''), round1(promedioCulturaEquipo(list, c))));
+  html += `<div style="margin-top:14px;">`;
+  p.conteoIndices.forEach(i => {
+    html += `<div class="field-row"><span class="label">${i.nombre}</span><span class="level-pill level-bajo">Bajo en ${i.bajo}/${i.visto}</span></div>`;
+  });
+  html += `</div></div></details>`;
+
+  html += `<details class="accordion"><summary>Habilidades de Liderazgo — promedio del equipo</summary><div class="accordion-body">`;
+  ESTILOS.forEach(e => html += bar(e.replace('Liderazgo ', ''), round1(promedioEstiloLiderazgo(list, e))));
+  LID_INDICES.forEach(nombre => {
+    const counts = distribucionNivelesEquipo(list, emp => {
+      const item = (emp.evaluacion?.detalle?.liderazgoIndices || []).find(i => i.nombre === nombre);
+      return item ? item.nivel : null;
+    });
+    html += renderDistribucionNiveles(nombre, counts);
+  });
+  html += `</div></details>`;
 
   return html;
 }
@@ -790,14 +882,6 @@ function renderListaCurada(items, colorBorde){
   `).join('');
 }
 
-function renderFortalezasAreasEquipo(narrativa){
-  let html = `<h3 class="section-title">💪 Fortalezas para apalancarnos</h3>`;
-  html += renderListaCurada(narrativa.fortalezas, 'var(--cyan)');
-  html += `<h3 class="section-title" style="margin-top:22px;">🎯 Áreas a mejorar (compartidas por el equipo)</h3>`;
-  html += renderListaCurada(narrativa.areas, 'var(--bajo)');
-  return html;
-}
-
 function renderPlanGrupalEquipo(narrativa){
   let html = `<p style="font-size:13px;color:var(--muted);margin-bottom:16px;">La idea es avanzar apalancándonos de lo que ya funciona: si las fortalezas de arriba se refuerzan, las áreas en desarrollo también mejoran.</p>`;
   html += renderListaCurada(narrativa.planGrupal, 'var(--accent)');
@@ -805,7 +889,7 @@ function renderPlanGrupalEquipo(narrativa){
 }
 
 const TAB_LABELS_DEFAULT = { basico: 'Datos básicos', sintesis: 'Síntesis', detalle: 'Detalle pruebas' };
-const TAB_LABELS_EQUIPO  = { basico: 'Panorama', sintesis: 'Fortalezas y áreas', detalle: 'Plan de desarrollo grupal' };
+const TAB_LABELS_EQUIPO  = { basico: 'Resumen', sintesis: 'Detalle de pruebas', detalle: 'Plan de desarrollo grupal' };
 
 function setTabLabels(labels){
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -816,21 +900,22 @@ function setTabLabels(labels){
 
 async function openTeamDrawer(){
   document.getElementById('drawerName').textContent = 'Ficha de Equipo';
-  document.getElementById('drawerRole').textContent = `RH · Panorama y plan de desarrollo grupal · basado en ${employees.length} ficha(s) visible(s)`;
+  document.getElementById('drawerRole').textContent = `RH · Resumen, detalle de pruebas y plan de desarrollo grupal · basado en ${employees.length} ficha(s) visible(s)`;
   setTabLabels(TAB_LABELS_EQUIPO);
 
-  document.getElementById('panel-basico').innerHTML = renderPanoramaEquipo(employees);
-  document.getElementById('panel-sintesis').innerHTML = '<p style="color:var(--muted);">Cargando...</p>';
-  document.getElementById('panel-detalle').innerHTML = '';
+  document.getElementById('panel-basico').innerHTML = '<p style="color:var(--muted);">Cargando...</p>';
+  document.getElementById('panel-sintesis').innerHTML = renderDetallePruebasEquipo(employees);
+  document.getElementById('panel-detalle').innerHTML = '<p style="color:var(--muted);">Cargando...</p>';
   document.getElementById('pdfButtonsRow').innerHTML = '';
 
   try {
     const narrativa = await loadEquipoNarrativa();
-    document.getElementById('panel-sintesis').innerHTML = renderFortalezasAreasEquipo(narrativa);
+    document.getElementById('panel-basico').innerHTML = renderResumenEquipo(employees, narrativa);
     document.getElementById('panel-detalle').innerHTML = renderPlanGrupalEquipo(narrativa);
   } catch(err){
     console.error(err);
-    document.getElementById('panel-sintesis').innerHTML = `<p style="color:var(--bajo);">No se pudo cargar el contenido curado (${err.message}).</p>`;
+    document.getElementById('panel-basico').innerHTML = `<p style="color:var(--bajo);">No se pudo cargar el contenido curado (${err.message}).</p>`;
+    document.getElementById('panel-detalle').innerHTML = '';
   }
 
   document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', i===0));
