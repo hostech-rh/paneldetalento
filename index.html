@@ -546,10 +546,14 @@
    ========================================================= */
 const DRIVE_CONFIG = {
   apiKey: "AIzaSyCtOyOUDG951Q00BpZHnshAGEhGRctCNjg",
-  rootFolderId: "1e7SVnZVxIFQYtFGRQ2wDqHvchEUSVhSH"
+  rootFolderId: "1e7SVnZVxIFQYtFGRQ2wDqHvchEUSVhSH",
+  // Hoja de Google Sheets "Jerarquia_Panel_Talento" — define quién ve a quién.
+  // Columnas esperadas: Nombre completo | Correo @hostech.com.mx | Reporta a (correo del jefe) | Rol
+  jerarquiaSheetId: "1BBCxByf6cZmPvh9DTBNM_F-_WEdG3Iad_WOcQR93bKY"
 };
 
 let employees = [];
+let currentUserEmail = null; // correo con el que la persona inició sesión
 
 async function driveList(query){
   const fields = encodeURIComponent('files(id,name,mimeType)');
@@ -568,6 +572,127 @@ async function driveGetJson(fileId){
   const res = await fetch(url);
   if(!res.ok) throw new Error(`Drive get ${res.status}`);
   return res.json();
+}
+
+/* ================= JERARQUÍA / PERMISOS =================
+   Lee la hoja de Google Sheets "Jerarquia_Panel_Talento" y calcula,
+   para el correo con el que la persona inició sesión, qué fichas
+   puede ver:
+     - Rol = "Admin" (o contiene la palabra Admin) → ve todas.
+     - Cualquier otra persona → ve su propia ficha, la de su jefe
+       directo (columna "Reporta a"), y las de todos sus reportes
+       (directos e indirectos, bajando toda la cadena).
+   No requiere activar la API de Sheets: se usa el export a CSV de
+   la propia API de Drive, que ya está habilitada.
+   ============================================================ */
+
+function normalizaTexto(s){
+  return (s || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, ''); // quita acentos
+}
+
+async function driveExportCsv(fileId){
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/csv&key=${DRIVE_CONFIG.apiKey}`;
+  const res = await fetch(url);
+  if(!res.ok){
+    const body = await res.text().catch(() => '');
+    throw new Error(`Drive export ${res.status}: ${body.slice(0,200)}`);
+  }
+  return res.text();
+}
+
+// Parser de CSV sencillo (soporta campos entre comillas por si acaso).
+function parseCsv(text){
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  const pushField = () => { row.push(field); field = ''; };
+  const pushRow = () => { pushField(); rows.push(row); row = []; };
+  const clean = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  for(let i = 0; i < clean.length; i++){
+    const c = clean[i];
+    if(inQuotes){
+      if(c === '"'){
+        if(clean[i+1] === '"'){ field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if(c === '"') inQuotes = true;
+      else if(c === ',') pushField();
+      else if(c === '\n') pushRow();
+      else field += c;
+    }
+  }
+  if(field.length || row.length) pushRow();
+  return rows.filter(r => r.some(c => c && c.trim() !== ''));
+}
+
+async function loadJerarquiaRows(){
+  const csv = await driveExportCsv(DRIVE_CONFIG.jerarquiaSheetId);
+  const rows = parseCsv(csv);
+  // rows[0] es el encabezado: Nombre completo, Correo, Reporta a, Rol
+  return rows.slice(1).map(r => ({
+    nombre: (r[0] || '').trim(),
+    correo: normalizaTexto(r[1]),
+    reportaA: normalizaTexto(r[2]),
+    rol: (r[3] || '').trim()
+  })).filter(r => r.correo); // ignora filas sin correo capturado aún
+}
+
+// Calcula el conjunto de correos visibles para `myEmail`.
+// Devuelve { mode: 'all' } | { mode: 'denied' } | { mode: 'subset', correos: Set }
+function calcularVisibilidad(rows, myEmail){
+  const myEmailN = normalizaTexto(myEmail);
+  const myRow = rows.find(r => r.correo === myEmailN);
+  if(!myRow){
+    return { mode: 'denied' };
+  }
+  if(normalizaTexto(myRow.rol).includes('admin')){
+    return { mode: 'all' };
+  }
+
+  // Empezamos SOLO con mi propio correo como semilla, para que la
+  // expansión hacia abajo (mis reportes) no se contamine con el jefe.
+  const visibles = new Set([myEmailN]);
+
+  // Bajar toda la cadena de reportes (directos e indirectos).
+  let cambiado = true;
+  while(cambiado){
+    cambiado = false;
+    for(const r of rows){
+      if(r.reportaA && visibles.has(r.reportaA) && !visibles.has(r.correo)){
+        visibles.add(r.correo);
+        cambiado = true;
+      }
+    }
+  }
+
+  // Hasta el final agregamos al jefe directo (no participa en la expansión).
+  if(myRow.reportaA) visibles.add(myRow.reportaA);
+
+  return { mode: 'subset', correos: visibles };
+}
+
+// Filtra la lista de empleados cargada de Drive según la visibilidad calculada.
+// El cruce se hace por NOMBRE (normalizado), ya que datos.json no guarda correo.
+function filtrarPorPermisos(loaded, jerarquiaRows, visibilidad){
+  if(visibilidad.mode === 'all') return loaded;
+  if(visibilidad.mode === 'denied') return [];
+
+  const nombreACorreo = {};
+  jerarquiaRows.forEach(r => { nombreACorreo[normalizaTexto(r.nombre)] = r.correo; });
+
+  return loaded.filter(emp => {
+    const correo = nombreACorreo[normalizaTexto(emp.name)];
+    if(!correo){
+      console.warn(`"${emp.name}" no aparece en la hoja de jerarquía (o el nombre no coincide exactamente) — se oculta por seguridad.`);
+      return false;
+    }
+    return visibilidad.correos.has(correo);
+  });
 }
 
 function setSyncStatus(html){
@@ -626,16 +751,32 @@ async function loadEmployeesFromDrive(){
         erroresPorCarpeta.push(`${folder.name}: ${innerErr.message}`);
       }
     }
-    employees = loaded;
+    // ---- Aplicar permisos según la hoja de jerarquía ----
+    let visibles = loaded;
+    let avisoPermisos = '';
+    try {
+      const jerarquiaRows = await loadJerarquiaRows();
+      const visibilidad = calcularVisibilidad(jerarquiaRows, currentUserEmail);
+      if(visibilidad.mode === 'denied'){
+        avisoPermisos = ` · ⚠️ Tu correo (${currentUserEmail}) no está registrado en la hoja de jerarquía, así que no se muestra ninguna ficha. Pide a RH que te agregue.`;
+      }
+      visibles = filtrarPorPermisos(loaded, jerarquiaRows, visibilidad);
+    } catch(permErr){
+      console.error('No se pudo aplicar la jerarquía de permisos:', permErr);
+      avisoPermisos = ` · ⚠️ No se pudo verificar tus permisos (${permErr.message}); por seguridad no se muestra ninguna ficha.`;
+      visibles = [];
+    }
+
+    employees = visibles;
     renderCards(employees);
     if(employees.length === 0){
       const detalle = subfolders.length === 0
         ? 'No se encontró ninguna subcarpeta dentro de la carpeta raíz (revisa el ID de carpeta o los permisos para "Cualquiera con el enlace").'
         : erroresPorCarpeta.slice(0, 3).join(' · ');
-      setSyncStatus(`⚠️ Conectado a Drive (${subfolders.length} subcarpeta(s) vista(s)), pero 0 se pudieron leer. ${detalle}`);
+      setSyncStatus(`⚠️ Conectado a Drive (${subfolders.length} subcarpeta(s) vista(s)), pero 0 se pudieron leer o mostrar. ${detalle}${avisoPermisos}`);
     } else {
       const now = new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
-      let msg = `✅ Sincronizado con Drive · ${now} (${employees.length} de ${subfolders.length} carpetas)`;
+      let msg = `✅ Sincronizado con Drive · ${now} (${employees.length} de ${subfolders.length} carpetas visibles para ti)${avisoPermisos}`;
       setSyncStatus(msg);
     }
   } catch(err){
@@ -1031,6 +1172,7 @@ function handleCredentialResponse(response){
       sessionStorage.setItem('panelTalentoSesion', JSON.stringify({ email, ts: Date.now() }));
     } catch(e){ /* si el navegador bloquea sessionStorage, simplemente no se recuerda */ }
 
+    currentUserEmail = email;
     document.getElementById('authGate').style.display = 'none';
     document.getElementById('appContent').style.display = 'block';
     document.getElementById('logoutBtn').style.display = 'inline-block';
@@ -1063,6 +1205,10 @@ window.addEventListener('load', () => {
   // Si ya inició sesión antes en esta misma pestaña/navegador (y no lo ha
   // cerrado), saltamos directo al panel sin pedirle login otra vez.
   if(haySesionRecordada()){
+    try {
+      const data = JSON.parse(sessionStorage.getItem('panelTalentoSesion'));
+      currentUserEmail = data.email;
+    } catch(e){}
     document.getElementById('authGate').style.display = 'none';
     document.getElementById('appContent').style.display = 'block';
     document.getElementById('logoutBtn').style.display = 'inline-block';
