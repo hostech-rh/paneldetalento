@@ -488,6 +488,11 @@
 
 <footer class="hint">
   ¿Cómo agregar a alguien nuevo? Crea una carpeta con su nombre dentro de la carpeta de Drive, sube ahí su <code>datos.json</code> (y opcionalmente su PDF de resumen), y recarga esta página. No requiere tocar este archivo ni programación adicional.
+  <br><br>
+  <a href="https://drive.google.com/file/d/1GqPX93CCKZXyaGmqt9vfDofdTIaC5Pyj/view" target="_blank" rel="noopener"
+     style="display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-weight:600;text-decoration:none;">
+    📘 Guía rápida para interpretar tus resultados
+  </a>
 </footer>
 
 <div class="overlay" id="overlay"></div>
@@ -756,7 +761,15 @@ function colorPorPuntuacion(p){
 function renderRankingTable(ranking){
   const filas = ranking.slice().sort((a,b) => b.puntuacionGlobal - a.puntuacionGlobal);
   let html = `<h3 class="section-title">Ranking del equipo — batería Hirint</h3>
-  <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Puntuación global, tiempo invertido e índice por cada prueba. Mismo orden que en la plataforma de Hirint.</p>
+  <p style="font-size:12px;color:var(--muted);margin:0 0 8px;">Puntuación global, tiempo invertido e índice por cada prueba. Mismo orden que en la plataforma de Hirint.</p>
+  <details style="margin-bottom:10px;">
+    <summary style="cursor:pointer;font-size:12px;color:var(--accent);font-weight:600;">ⓘ ¿Qué significa la "Puntuación global"?</summary>
+    <p style="font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.5;">
+      No es un promedio simple de las 4 pruebas. Es el <b>apego general de la persona al perfil ideal definido para el equipo Directivo/Gerencial</b> —
+      qué tanto coincide su personalidad, DISC, cultura y liderazgo con el perfil que se buscaba al diseñar esta evaluación.
+      Por eso alguien puede salir "Alto" en una prueba individual y aun así tener una puntuación global distinta: lo que se mide aquí es el ajuste conjunto al perfil buscado, no el desempeño en una prueba aislada.
+    </p>
+  </details>
   <div style="overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
     <thead>
