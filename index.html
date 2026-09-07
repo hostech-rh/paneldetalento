@@ -552,7 +552,10 @@ const DRIVE_CONFIG = {
   jerarquiaSheetId: "1BBCxByf6cZmPvh9DTBNM_F-_WEdG3Iad_WOcQR93bKY",
   // Archivo con el resumen curado de fortalezas / áreas / plan de desarrollo
   // grupal. Editable en Drive sin tocar este código.
-  equipoJsonId: "1EXKglOChqWSlILT1CSXlJx5O-a3zMiZN"
+  equipoJsonId: "1EXKglOChqWSlILT1CSXlJx5O-a3zMiZN",
+  // Ranking global de Hirint (puntuación general, tiempo e índices por prueba).
+  // Editable en Drive sin tocar este código.
+  rankingJsonId: "1AN82Rw9NTFoxykBVcO0vyzNkCZZvvnLL"
 };
 
 let employees = [];
@@ -730,11 +733,58 @@ function filtrarPorPermisos(loaded, jerarquiaRows, visibilidad){
    ================================================================= */
 
 let equipoNarrativaCache = null;
+let rankingCache = null;
 
 async function loadEquipoNarrativa(){
   if(equipoNarrativaCache) return equipoNarrativaCache;
   equipoNarrativaCache = await driveGetJson(DRIVE_CONFIG.equipoJsonId);
   return equipoNarrativaCache;
+}
+
+async function loadRankingData(){
+  if(rankingCache) return rankingCache;
+  rankingCache = await driveGetJson(DRIVE_CONFIG.rankingJsonId);
+  return rankingCache;
+}
+
+function colorPorPuntuacion(p){
+  if(p >= 75) return 'var(--cyan)';
+  if(p >= 60) return 'var(--accent)';
+  return 'var(--bajo)';
+}
+
+function renderRankingTable(ranking){
+  const filas = ranking.slice().sort((a,b) => b.puntuacionGlobal - a.puntuacionGlobal);
+  let html = `<h3 class="section-title">Ranking del equipo — batería Hirint</h3>
+  <p style="font-size:12px;color:var(--muted);margin:0 0 10px;">Puntuación global, tiempo invertido e índice por cada prueba. Mismo orden que en la plataforma de Hirint.</p>
+  <div style="overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+    <thead>
+      <tr style="border-bottom:2px solid var(--accent);text-align:left;">
+        <th style="padding:6px 8px;color:var(--muted);font-weight:600;">#</th>
+        <th style="padding:6px 8px;color:var(--muted);font-weight:600;">Nombre</th>
+        <th style="padding:6px 8px;color:var(--muted);font-weight:600;text-align:center;">Puntuación global</th>
+        <th style="padding:6px 8px;color:var(--muted);font-weight:600;text-align:center;">Tiempo</th>
+        <th style="padding:6px 8px;color:var(--muted);font-weight:600;text-align:center;">Liderazgo</th>
+        <th style="padding:6px 8px;color:var(--muted);font-weight:600;text-align:center;">Personalidad</th>
+        <th style="padding:6px 8px;color:var(--muted);font-weight:600;text-align:center;">Cultura y Mentalidad</th>
+      </tr>
+    </thead>
+    <tbody>`;
+  filas.forEach((f, i) => {
+    const bg = i % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.02)';
+    html += `<tr style="background:${bg};border-bottom:1px solid rgba(0,0,0,0.06);">
+      <td style="padding:7px 8px;color:var(--muted);">${i+1}</td>
+      <td style="padding:7px 8px;font-weight:600;">${f.nombre}</td>
+      <td style="padding:7px 8px;text-align:center;"><span style="font-weight:700;color:${colorPorPuntuacion(f.puntuacionGlobal)};">${f.puntuacionGlobal.toFixed(1)}%</span></td>
+      <td style="padding:7px 8px;text-align:center;color:var(--muted);">${f.tiempoMin} min</td>
+      <td style="padding:7px 8px;text-align:center;">${f.liderazgo.toFixed(1)}%</td>
+      <td style="padding:7px 8px;text-align:center;">${f.personalidad}%</td>
+      <td style="padding:7px 8px;text-align:center;">${f.cultura.toFixed(1)}%</td>
+    </tr>`;
+  });
+  html += `</tbody></table></div>`;
+  return html;
 }
 
 function parsePct(str){
@@ -776,9 +826,16 @@ function calcularPanoramaEquipo(list){
   };
 }
 
-function renderResumenEquipo(list, narrativa){
+function renderResumenEquipo(list, narrativa, ranking){
   const p = calcularPanoramaEquipo(list);
-  let html = `<div class="stat-strip">
+  let html = '';
+
+  if(ranking && ranking.length){
+    html += renderRankingTable(ranking);
+    html += `<div style="height:1px;background:rgba(0,0,0,0.08);margin:16px 0;"></div>`;
+  }
+
+  html += `<div class="stat-strip">
     <div class="stat-box"><div class="num">${p.total}</div><div class="lbl">Fichas visibles</div></div>
     <div class="stat-box"><div class="num">${p.promLiderazgo ?? '—'}%</div><div class="lbl">Índice liderazgo prom.</div></div>
     <div class="stat-box"><div class="num">${p.promAjusteCultura ?? '—'}%</div><div class="lbl">Ajuste cultura prom.</div></div>
@@ -932,8 +989,8 @@ async function openTeamDrawer(){
   document.getElementById('pdfButtonsRow').innerHTML = '';
 
   try {
-    const narrativa = await loadEquipoNarrativa();
-    document.getElementById('panel-basico').innerHTML = renderResumenEquipo(employees, narrativa);
+    const [narrativa, ranking] = await Promise.all([loadEquipoNarrativa(), loadRankingData()]);
+    document.getElementById('panel-basico').innerHTML = renderResumenEquipo(employees, narrativa, ranking);
     document.getElementById('panel-detalle').innerHTML = renderPlanGrupalEquipo(narrativa);
   } catch(err){
     console.error(err);
