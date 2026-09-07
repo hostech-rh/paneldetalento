@@ -552,7 +552,7 @@ const DRIVE_CONFIG = {
   jerarquiaSheetId: "1BBCxByf6cZmPvh9DTBNM_F-_WEdG3Iad_WOcQR93bKY",
   // Archivo con el resumen curado de fortalezas / áreas / plan de desarrollo
   // grupal. Editable en Drive sin tocar este código.
-  equipoJsonId: "1ganqfMxM3sRLqgcuAwHnNyQxL5n7DYrC"
+  equipoJsonId: "1EXKglOChqWSlILT1CSXlJx5O-a3zMiZN"
 };
 
 let employees = [];
@@ -794,7 +794,7 @@ function renderResumenEquipo(list, narrativa){
   (narrativa.fortalezas || []).forEach(f => { html += `<li><b>${f.titulo}:</b> ${f.detalle}</li>`; });
   html += `</ul>`;
 
-  html += `<h3 class="section-title">Qué reforzar</h3><ul class="bullets">`;
+  html += `<h3 class="section-title">Áreas de oportunidad</h3><ul class="bullets">`;
   (narrativa.areas || []).forEach(a => { html += `<li><b>${a.titulo}:</b> ${a.detalle}</li>`; });
   html += `</ul>`;
 
