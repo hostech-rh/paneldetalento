@@ -1127,6 +1127,7 @@ function levelClass(nivel){
 
 function renderCards(list){
   grid.innerHTML = '';
+  list = list.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es', {sensitivity: 'base'}));
 
   if(esAdminActual){
     const teamCard = document.createElement('div');
